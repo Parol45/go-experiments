@@ -140,11 +140,13 @@ func decodeDict(bytes []byte, index int) (string, int, error) {
 	return temp, index + 1, err
 }
 
-// y - message type: r - response, q - query, e - error
-// v - version
-// t - transaction id
-// id - id of node
-// ip - ...
+// a - arguments (string)
+// q - method name (string)
+// y - message type: r - response, q - query, e - error (string)
+// v - version (hex)
+// t - transaction id (hex)
+// id - id of node (hex)
+// ip - ... (hex)
 func BencodeToJSON(encodedStr []byte) (string, error) {
 	var decodedStr string
 	var err error
