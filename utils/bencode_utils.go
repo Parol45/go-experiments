@@ -11,6 +11,35 @@ func isByteDigitChar(symbol byte) bool {
 	return 47 < symbol && symbol < 58
 }
 
+func tryDecodeIpOrHash(bytes []byte) string {
+	needToConvert := false
+	for _, b := range bytes {
+		if b > 127 {
+			needToConvert = true
+			break
+		}
+	}
+	if !needToConvert {
+		return string(bytes)
+	}
+
+	var result strings.Builder
+	if len(bytes) == 6 {
+		ip1, err1 := strconv.ParseInt(fmt.Sprintf("%x", bytes[0]), 16, 64)
+		ip2, err2 := strconv.ParseInt(fmt.Sprintf("%x", bytes[1]), 16, 64)
+		ip3, err3 := strconv.ParseInt(fmt.Sprintf("%x", bytes[2]), 16, 64)
+		ip4, err4 := strconv.ParseInt(fmt.Sprintf("%x", bytes[3]), 16, 64)
+		port, err5 := strconv.ParseInt(fmt.Sprintf("%x", bytes[4])+fmt.Sprintf("%x", bytes[5]), 16, 64)
+		if err1 == nil && err2 == nil && err3 == nil && err4 == nil && err5 == nil {
+			return fmt.Sprintf("%d.%d.%d.%d:%d", ip1, ip2, ip3, ip4, port)
+		}
+	}
+	for _, b := range bytes {
+		result.WriteString(fmt.Sprintf("%x", b))
+	}
+	return result.String()
+}
+
 func decodeNextElement(bytes []byte, index int) (string, int, error) {
 	if bytes[index] == 'i' {
 		return decodeNumber(bytes, index)
@@ -78,7 +107,8 @@ func decodeStringLiteral(bytes []byte, index int) (string, int, error) {
 		return "", 0, errors.New(fmt.Sprintf("Wrong string length. Index: %d, Symbol: '%s'", index, string(bytes[index])))
 	}
 	index++
-	return string(bytes[index : index+strLen]), index + strLen, nil
+	resultingStr := tryDecodeIpOrHash(bytes[index : index+strLen])
+	return resultingStr, index + strLen, nil
 }
 
 func decodeDict(bytes []byte, index int) (string, int, error) {
@@ -116,6 +146,11 @@ func decodeDict(bytes []byte, index int) (string, int, error) {
 	return temp, index + 1, err
 }
 
+// y key is type of package: r - response, q - query
+// v - version
+// t - dunno
+// id - id of node
+// ip
 func BencodeToJSON(encodedStr []byte) (string, error) {
 	var decodedStr string
 	var err error

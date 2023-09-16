@@ -31,7 +31,6 @@ func sendUDPPacket(addr string, contents string) []byte {
 func main() {
 	//utils.SetupLogger()
 	response := sendUDPPacket("46.147.238.182:14184", "d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t1:01:y1:qe")
-	slog.Info(string(response))
 	json, err := utils.BencodeToJSON(response)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Error while converting bencode to json: %v\n", err))
