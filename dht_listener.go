@@ -8,6 +8,7 @@ import (
 	"net"
 )
 
+// TODO send []byte, not string
 func sendUDPPacket(addr string, contents string) []byte {
 	p := make([]byte, 2048)
 	var n int
@@ -30,11 +31,21 @@ func sendUDPPacket(addr string, contents string) []byte {
 
 func main() {
 	//utils.SetupLogger()
-	response := sendUDPPacket("46.147.238.182:14184", "d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t4:34d81:y1:qe")
+	response := sendUDPPacket("95.153.193.92:25928", "d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t4:34d81:y1:qe")
+	slog.Info(fmt.Sprintf("Encoded json is: %s\n", string(response)))
 	json, err := utils.BencodeToJSON(response)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Error while converting bencode to json: %v\n", err))
 	} else {
 		slog.Info(fmt.Sprintf("Decoded json is: %s\n", json))
 	}
+	var bytes []byte
+	bytes, err = utils.JSONToBencode(json)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error while converting bencode to json: %v\n", err))
+	} else {
+		slog.Info(fmt.Sprintf("Encoded json is: %s\n", string(bytes)))
+	}
+	json, _ = utils.BencodeToJSON(bytes)
+	slog.Info(fmt.Sprintf("Decoded json is: %s\n", json))
 }

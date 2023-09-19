@@ -40,11 +40,11 @@ func main() {
 		newLinks := utils.ParseAllLinks(html)
 		for _, newLink := range newLinks {
 			if strings.HasPrefix(newLink, "http") {
-				if !utils.InArray(newLink, links) {
+				if !utils.InStringArray(newLink, links) {
 					links = append(links, newLink)
 				}
 			} else if strings.HasPrefix(newLink, "/") && urlOrigin != "" {
-				if !utils.InArray(newLink, links) {
+				if !utils.InStringArray(newLink, links) {
 					links = append(links, urlOrigin+newLink)
 				}
 			} else if strings.HasPrefix(newLink, "magnet:?xt=urn:") {
