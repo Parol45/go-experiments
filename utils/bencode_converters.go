@@ -26,9 +26,6 @@ func tryDecodeIpOrHash(bytes []byte, key string) string {
 	var result strings.Builder
 	for _, b := range bytes {
 		str := fmt.Sprintf("%02x", b)
-		//for len(str) < 2 {
-		//	str = "0" + str
-		//}
 		result.WriteString(str)
 	}
 	return result.String()
