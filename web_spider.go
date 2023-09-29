@@ -24,7 +24,7 @@ func appendLineToFile(magnet string) {
 	}
 }
 
-func main() {
+func submain() {
 	utils.SetupLogger()
 
 	os.Remove("magnets.txt")

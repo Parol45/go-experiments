@@ -12,17 +12,19 @@ func byteIsDigit(symbol byte) bool {
 	return 47 < symbol && symbol < 58
 }
 
-func tryDecodeIpOrHash(bytes []byte, key string) string {
-	if key == "\"ip\"" {
-		ip1, err1 := strconv.ParseInt(fmt.Sprintf("%x", bytes[0]), 16, 64)
-		ip2, err2 := strconv.ParseInt(fmt.Sprintf("%x", bytes[1]), 16, 64)
-		ip3, err3 := strconv.ParseInt(fmt.Sprintf("%x", bytes[2]), 16, 64)
-		ip4, err4 := strconv.ParseInt(fmt.Sprintf("%x", bytes[3]), 16, 64)
-		port, err5 := strconv.ParseInt(fmt.Sprintf("%x", bytes[4])+fmt.Sprintf("%x", bytes[5]), 16, 64)
-		if err1 == nil && err2 == nil && err3 == nil && err4 == nil && err5 == nil {
-			return fmt.Sprintf("%d.%d.%d.%d:%d", ip1, ip2, ip3, ip4, port)
-		}
+func decodeIp(ipBytes []byte) string {
+	ip1, err1 := strconv.ParseInt(fmt.Sprintf("%x", ipBytes[0]), 16, 64)
+	ip2, err2 := strconv.ParseInt(fmt.Sprintf("%x", ipBytes[1]), 16, 64)
+	ip3, err3 := strconv.ParseInt(fmt.Sprintf("%x", ipBytes[2]), 16, 64)
+	ip4, err4 := strconv.ParseInt(fmt.Sprintf("%x", ipBytes[3]), 16, 64)
+	port, err5 := strconv.ParseInt(fmt.Sprintf("%x", ipBytes[4])+fmt.Sprintf("%x", ipBytes[5]), 16, 64)
+	if err1 == nil && err2 == nil && err3 == nil && err4 == nil && err5 == nil {
+		return fmt.Sprintf("%d.%d.%d.%d:%d", ip1, ip2, ip3, ip4, port)
 	}
+	return ""
+}
+
+func decodeHash(bytes []byte) string {
 	var result strings.Builder
 	for _, b := range bytes {
 		str := fmt.Sprintf("%02x", b)
@@ -31,13 +33,37 @@ func tryDecodeIpOrHash(bytes []byte, key string) string {
 	return result.String()
 }
 
+func tryDecodeIpOrHash(bytes []byte, key string) string {
+	if key == "\"ip\"" {
+		return decodeIp(bytes)
+	} else if key == "\"nodes\"" {
+		var result strings.Builder
+		index := 0
+		for index < len(bytes) {
+			result.WriteString(decodeHash(bytes[index:index+20]))
+			result.WriteString("   ")
+			index += 20
+			result.WriteString(decodeIp(bytes[index:index+6]))
+			result.WriteString("   ")
+			index += 6
+		}
+		str := result.String()
+		lastIndex := len(str)-3
+		if lastIndex < 0 {
+			lastIndex = 0
+		}
+		return str[:lastIndex]
+	}
+	return decodeHash(bytes)
+}
+
 func decodeNextElement(bytes []byte, index int, key string) (string, int, error) {
 	if bytes[index] == 'i' {
 		return decodeNumber(bytes, index)
 	} else if bytes[index] == 'd' {
 		return decodeDict(bytes, index)
 	} else if bytes[index] == 'l' {
-		return decodeList(bytes, index)
+		return decodeList(bytes, index, key)
 	} else if byteIsDigit(bytes[index]) {
 		return decodeStringLiteral(bytes, index, key)
 	} else {
@@ -45,7 +71,7 @@ func decodeNextElement(bytes []byte, index int, key string) (string, int, error)
 	}
 }
 
-func decodeList(bytes []byte, index int) (string, int, error) {
+func decodeList(bytes []byte, index int, key string) (string, int, error) {
 	startIndex := index
 	index++
 	builder := strings.Builder{}
@@ -53,7 +79,7 @@ func decodeList(bytes []byte, index int) (string, int, error) {
 	var tempStr string
 	var err error
 	for index < len(bytes) && bytes[index] != 'e' {
-		tempStr, index, err = decodeNextElement(bytes, index, "")
+		tempStr, index, err = decodeNextElement(bytes, index, key)
 		if err != nil {
 			return "", 0, err
 		}
@@ -94,7 +120,9 @@ func decodeStringLiteral(bytes []byte, index int, key string) (string, int, erro
 	}
 	index++
 	var resultingStr string
-	if !InStringArray(key, []string{"\"y\"", "\"q\"", ""}) {
+	if key == `"values"` {
+		resultingStr = "\"" + decodeIp(bytes[index:index+strLen]) + "\""
+	} else if !InStringArray(key, []string{"\"y\"", "\"q\"", "", "\"e\""}) {
 		resultingStr = "\"" + tryDecodeIpOrHash(bytes[index:index+strLen], key) + "\""
 	} else {
 		resultingStr = "\"" + string(bytes[index:index+strLen]) + "\""
@@ -143,7 +171,7 @@ func encodeNextElement(json string, index int, key string) ([]byte, int, error) 
 	} else if json[index] == '{' {
 		return encodeDict(json, index)
 	} else if json[index] == '[' {
-		return encodeList(json, index)
+		return encodeList(json, index, key)
 	} else if json[index] == '"' {
 		return encodeStringLiteral(json, index, key)
 	} else {
@@ -151,32 +179,34 @@ func encodeNextElement(json string, index int, key string) ([]byte, int, error) 
 	}
 }
 
-func encodeIpOrHash(literal string, key string) ([]byte, error) {
+func encodeIp(literal string) ([]byte, error) {
 	var result []byte
-	if key == "ip" {
-		parts := strings.Split(strings.Replace(literal, ":", ".", -1), ".")
-		i := 0
-		for i < 4 {
-			ipPart := parts[i]
-			ipInt, err := strconv.Atoi(ipPart) // ahoy
-			if err != nil || ipInt > 255 || ipInt < 0 {
-				return nil, errors.New(fmt.Sprintf("Problems with parsing ip: '%s', part: '%s'", literal, ipPart))
-			}
-			result = append(result, byte(ipInt))
-			i++
-		}
-		ipPart := parts[4]
-		portInt, err := strconv.Atoi(ipPart) // ahoy
-		if err != nil || portInt > 65535 {
+	parts := strings.Split(strings.ReplaceAll(literal, ":", "."), ".")
+	i := 0
+	for i < 4 {
+		ipPart := parts[i]
+		ipInt, err := strconv.Atoi(ipPart) // ahoy
+		if err != nil || ipInt > 255 || ipInt < 0 {
 			return nil, errors.New(fmt.Sprintf("Problems with parsing ip: '%s', part: '%s'", literal, ipPart))
 		}
-		portStr := fmt.Sprintf("%x", portInt)
-		first, _ := hex.DecodeString(portStr[:2])
-		second, _ := hex.DecodeString(portStr[2:])
-		result = append(result, first...)
-		result = append(result, second...)
-		return result, nil
+		result = append(result, byte(ipInt))
+		i++
 	}
+	ipPart := parts[4]
+	portInt, err := strconv.Atoi(ipPart) // ahoy
+	if err != nil || portInt > 65535 {
+		return nil, errors.New(fmt.Sprintf("Problems with parsing ip: '%s', part: '%s'", literal, ipPart))
+	}
+	portStr := fmt.Sprintf("%x", portInt)
+	first, _ := hex.DecodeString(portStr[:2])
+	second, _ := hex.DecodeString(portStr[2:])
+	result = append(result, first...)
+	result = append(result, second...)
+	return result, nil
+}
+
+func encodeHash(literal string) ([]byte, error) {
+	var result []byte
 	var i int
 	if len(literal)%2 != 0 {
 		return nil, errors.New(fmt.Sprintf("Even number of ascii symbols while converting to []bytes string: '%s'", literal))
@@ -190,6 +220,35 @@ func encodeIpOrHash(literal string, key string) ([]byte, error) {
 		i++
 	}
 	return result, nil
+}
+
+func encodeIpOrHash(literal string, key string) ([]byte, error) {
+	if key == "ip" {
+		return encodeIp(literal)
+	} else if key == "nodes" {
+		var result []byte
+		parts := strings.Split(literal, "   ")
+		for i, p := range(parts) {
+			if p == "" {
+				continue
+			}
+			if i % 2 == 1 {
+				ip, err := encodeIp(p)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, ip...)
+			} else {
+				hash, err := encodeHash(p)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, hash...)
+			}
+		}
+		return result, nil
+	}
+	return encodeHash(literal)
 }
 
 func encodeDict(json string, index int) ([]byte, int, error) {
@@ -234,7 +293,7 @@ func encodeDict(json string, index int) ([]byte, int, error) {
 	return resultingBytes, index, err
 }
 
-func encodeList(json string, index int) ([]byte, int, error) {
+func encodeList(json string, index int, key string) ([]byte, int, error) {
 	startIndex := index
 	index++
 	var tempBytes, resultingBytes []byte
@@ -242,7 +301,7 @@ func encodeList(json string, index int) ([]byte, int, error) {
 	resultingBytes = append(resultingBytes, 'l')
 	for index < len(json) && json[index] != ']' {
 		if json[index] != ',' {
-			tempBytes, index, err = encodeNextElement(json, index, "")
+			tempBytes, index, err = encodeNextElement(json, index, key)
 			resultingBytes = append(resultingBytes, tempBytes...)
 			if err != nil {
 				return nil, 0, err
@@ -254,7 +313,7 @@ func encodeList(json string, index int) ([]byte, int, error) {
 		return nil, 0, errors.New(fmt.Sprintf("No closing ']' symbol for list starting at index: %d", startIndex))
 	}
 	resultingBytes = append(resultingBytes, 'e')
-	return tempBytes, index + 1, err
+	return resultingBytes, index, err
 }
 
 func encodeStringLiteral(json string, index int, key string) ([]byte, int, error) {
@@ -264,14 +323,22 @@ func encodeStringLiteral(json string, index int, key string) ([]byte, int, error
 	var resultingBytes, temp []byte
 	var err error
 	var length int
-	if !InStringArray(key, []string{"y", "q", ""}) {
-		temp, err = encodeIpOrHash(literal, key)
-		length = len(temp)
-		resultingBytes = append(resultingBytes, fmt.Sprintf("%d:", length)...)
-		resultingBytes = append(resultingBytes, temp...)
+	if key == "values" {
+		temp, err = encodeIp(literal)
 		if err != nil {
 			return nil, 0, err
 		}
+		length = len(temp)
+		resultingBytes = append(resultingBytes, fmt.Sprintf("%d:", length)...)
+		resultingBytes = append(resultingBytes, temp...)
+	} else if !InStringArray(key, []string{"y", "q", "", "e"}) {
+		temp, err = encodeIpOrHash(literal, key)
+		if err != nil {
+			return nil, 0, err
+		}
+		length = len(temp)
+		resultingBytes = append(resultingBytes, fmt.Sprintf("%d:", length)...)
+		resultingBytes = append(resultingBytes, temp...)
 	} else {
 		length = len(literal)
 		resultingBytes = append(resultingBytes, fmt.Sprintf("%d:", length)...)
@@ -287,11 +354,11 @@ func encodeNumber(json string, index int) ([]byte, int, error) {
 		result.WriteByte(json[index])
 		index++
 	}
-	if index < len(json) && InByteArray(json[index], []byte{'.', ','}) {
+	if index < len(json) && json[index] == '.' {
 		return nil, 0, errors.New(fmt.Sprintf("Numbers must be integer. Index: %d", index))
 	}
 	result.WriteByte('e')
-	return []byte(result.String()), index + 1, nil
+	return []byte(result.String()), index-1, nil
 }
 
 // a - arguments (string)
@@ -313,10 +380,7 @@ func BencodeToJSON(encodedStr []byte) (string, error) {
 
 func JSONToBencode(json string) ([]byte, error) {
 	var formattedStr string
-	formattedStr = strings.Replace(json, " ", "", -1)
-	formattedStr = strings.Replace(json, "\n", "", -1)
-	formattedStr = strings.Replace(json, "\r", "", -1)
-	formattedStr = strings.Replace(json, "\t", "", -1)
+	formattedStr = strings.ReplaceAll(json, "\t", "")
 	var encodedBytes []byte
 	var err error
 	if len(formattedStr) > 0 {
